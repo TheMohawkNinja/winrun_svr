@@ -70,100 +70,107 @@ int main()
 		cout << "Inititalized Winsock" << endl;
 	}
 	
-	//Create socket
-	SOCKET listening = socket(AF_INET, SOCK_STREAM, 0);
-	if (listening == INVALID_SOCKET)
-	{
-		cerr << "Unable to create socket! Quitting..." << endl;
-		return -2;
-	}
-	else
-	{
-		cout << "Created socket " + to_string(listening) << endl;
-	}
-
-	//Bind IP and port to socket
+	//Create other needed vars
+	SOCKET listening;
 	sockaddr_in hint;
-	hint.sin_family = AF_INET;
-	hint.sin_port = htons(55000);
-	hint.sin_addr.S_un.S_addr = INADDR_ANY; //Could also use inet_pton
-	
-	bind(listening, (sockaddr*)&hint, sizeof(hint));
-
-	//Tell winsock that socket is for listening
-	cout << "Waiting for client to connect..." << endl;
-	listen(listening, SOMAXCONN);
-
-	//Wait for connection
 	sockaddr_in client;
 	int clientSize = sizeof(client);
-	SOCKET clientSocket = accept(listening, (sockaddr*)&client, &clientSize);
-
-	if (clientSocket == INVALID_SOCKET)
-	{
-		cerr << "Invalid socket! Quitting..." << endl;
-		return -3;
-	}
-
+	int bytesReceived = 0;
+	SOCKET clientSocket;
 	char host[NI_MAXHOST];		//Client name
 	char service[NI_MAXSERV];	//Service the client is connected on
+	char buf[bufsize];
 
-	ZeroMemory(host, NI_MAXHOST);	//Use memset(host,0,NI_MAXHOST) for Linux 
-	ZeroMemory(service, NI_MAXSERV);
-
-	if (getnameinfo((sockaddr*)&client, sizeof(client), host, NI_MAXHOST, service, NI_MAXSERV, 0) == 0) //Attempt to resolve client machine name, otherwise resort to IP
+	while (bytesReceived == 0)
 	{
-		cout << endl;
-		cout << host << " connected on port " << service << endl;
-	}
-	else
-	{
-		inet_ntop(AF_INET, &client.sin_addr, host, NI_MAXHOST);
-		cout << endl;
-		cout << host << " connected on port " << ntohs(client.sin_port) << endl;
-	}
-
-	//Close listening socket
-	closesocket(listening);
-
-	//Generate 64 digit code to signal the completion of the command execution and inform client.
-	srand(time(NULL));
-	for (int i = 0; i < 64; i++)
-	{
-		breakCode += to_string(rand() % 10);
-	}
-	cout << "breakCode = " + breakCode << endl;
-	send(clientSocket, breakCode.c_str(), (breakCode.length() + 1), 0);
-
-	//Main loop for running commands
-	while (true)
-	{
-		//Get data and run command
-		char buf[bufsize];
-		ZeroMemory(buf, bufsize);
-
-		//Wait for client to send data
-		int bytesReceived = recv(clientSocket, buf, bufsize, 0);
-
-		if (bytesReceived == SOCKET_ERROR)
+		//Initialize listening socket
+		listening = socket(AF_INET, SOCK_STREAM, 0);
+		if (listening == INVALID_SOCKET)
 		{
-			cout << "Socket Error recieved, did winrund stop?" << endl;
-		}
-		else if (bytesReceived == 0)
-		{
-			cout << "Client disconected." << endl;
+			cerr << "Unable to create socket! Quitting..." << endl;
+			return -2;
 		}
 		else
 		{
-			//Run command and echo output back to client
-			id = string(buf, 0, bytesReceived).substr(0, string(buf, 0, bytesReceived).find("\""));
-			cout << "Recieved command for ID: " + id << endl;
+			cout << "Created socket " + to_string(listening) << endl;
+		}
 
-			command = string(buf, 0, bytesReceived).substr(id.length(), (string(buf, 0, bytesReceived).length() - id.length())).c_str();
-			cout << "Running command " + command << endl;
-			getCmdOut(command, clientSocket, breakCode);
+		hint.sin_family = AF_INET;
+		hint.sin_port = htons(55000);
+		hint.sin_addr.S_un.S_addr = INADDR_ANY;
 
-			cout << "Command completed!" << endl;
+		bind(listening, (sockaddr*)&hint, sizeof(hint));
+
+		//Tell winsock that socket is for listening
+		cout << "Waiting for client to connect..." << endl;
+		listen(listening, SOMAXCONN);
+
+		clientSocket = accept(listening, (sockaddr*)&client, &clientSize);
+
+		if (clientSocket == INVALID_SOCKET)
+		{
+			cerr << "Invalid socket! Quitting..." << endl;
+			return -3;
+		}
+
+		ZeroMemory(host, NI_MAXHOST);
+		ZeroMemory(service, NI_MAXSERV);
+
+		//Attempt to resolve client machine name, otherwise resort to IP
+		if (getnameinfo((sockaddr*)&client, sizeof(client), host, NI_MAXHOST, service, NI_MAXSERV, 0) == 0)
+		{
+			cout << endl;
+			cout << host << " connected on port " << service << endl;
+		}
+		else
+		{
+			inet_ntop(AF_INET, &client.sin_addr, host, NI_MAXHOST);
+			cout << endl;
+			cout << host << " connected on port " << ntohs(client.sin_port) << endl;
+		}
+
+		//Close listening socket
+		closesocket(listening);
+
+		//Generate 64 digit code to signal the completion of the command execution and inform client.
+		srand(time(NULL));
+		for (int i = 0; i < 64; i++)
+		{
+			breakCode += to_string(rand() % 10);
+		}
+		cout << "breakCode = " + breakCode << endl;
+		send(clientSocket, breakCode.c_str(), (breakCode.length() + 1), 0);
+
+		//Main loop for running commands
+		while (true)
+		{
+			//Get data and run command
+			ZeroMemory(buf, bufsize);
+
+			//Wait for client to send data
+			bytesReceived = recv(clientSocket, buf, bufsize, 0);
+
+			if (bytesReceived == SOCKET_ERROR)
+			{
+				cout << "Socket Error recieved, did winrund stop?" << endl;
+			}
+			else if (bytesReceived == 0)
+			{
+				cout << "Client disconected." << endl;
+				break;
+			}
+			else
+			{
+				//Run command and echo output back to client
+				id = string(buf, 0, bytesReceived).substr(0, string(buf, 0, bytesReceived).find("\""));
+				cout << "Recieved command for ID: " + id << endl;
+
+				command = string(buf, 0, bytesReceived).substr(id.length(), (string(buf, 0, bytesReceived).length() - id.length())).c_str();
+				cout << "Running command " + command << endl;
+				getCmdOut(command, clientSocket, breakCode);
+
+				cout << "Command completed!" << endl;
+			}
 		}
 	}
 
