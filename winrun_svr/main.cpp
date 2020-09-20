@@ -1,64 +1,72 @@
 #include <iostream>
 #include <WS2tcpip.h>
 #include <string>
-#include <time.h> 
+#include <time.h>
+#include <thread>
 
 #pragma comment (lib,"ws2_32.lib")
 
 using namespace std;
 
 const int bufsize = 4096;
-string id;
 
-void getCmdOut(string cmd, int s, string b)
+void getCmdOut(string clientID, string cmd, int s, string b)
 {
 	int line = 0;
+	int recvBytes;
 	string data;
+	string recvStr;
 	FILE* stream;
 	char buffer[bufsize];
-	char recbuffer[bufsize];
+	char recvBuffer[bufsize];
 	cmd.append(" 2>&1");
 	stream = _popen(cmd.c_str(), "r");
 
 	//Send id
-	send(s, id.c_str(), id.length() + 1, 0);
+	send(s, clientID.c_str(), clientID.length() + 1, 0);
 
 	if (stream)
 	{
 		while (!feof(stream))
 		{
-			//cout<<fgets(buffer,max_buffer,stream);
 			if (fgets(buffer, bufsize, stream) != NULL)
 			{
 				data.append(buffer);
 
 				if (data.find("\n") != std::string::npos)
 				{
-					data = std::to_string(line) + "-" + data;
+					data = clientID + "-" + std::to_string(line) + "-" + data;
 					send(s, data.c_str(), data.length() + 1, 0);
 					cout << "\t" + data;
 					data = "";
 					line++;
 
-					ZeroMemory(recbuffer, bufsize);
-					recv(s, recbuffer, bufsize, 0);
+					ZeroMemory(recvBuffer, bufsize);
+
+					//Wait for signal to come in from client to continue working
+					do
+					{
+						recvBytes = recv(s, recvBuffer, bufsize, 0);
+						recvStr = std::string(recvBuffer, 0, recvBytes);
+					} while (recvStr.substr(0, recvStr.find("-")+2) != (clientID+"-1"));
 				}
 			}
 		}
 
 		//Send break code to client to signal completion of command execution
-		send(s, b.c_str(), (b.length() + 1), 0);
+		send(s, (clientID + "-" + b).c_str(), (clientID.length()+string("-").length()+b.length() + 1), 0);
+		cout << "Command completed!" << endl;
 
 		_pclose(stream);
 	}
 }
-int main()
+int winrun_svr_child(int port)
 {
 	//Initialize winsock
 	WSADATA wsData;
 	WORD ver = MAKEWORD(2, 2);
 	int wsok = WSAStartup(ver, &wsData);
-	string output, breakCode, command;
+	string output, breakCode, command, id;
 
 	if (wsok != 0)
 	{
@@ -69,7 +77,7 @@ int main()
 	{
 		cout << "Inititalized Winsock" << endl;
 	}
-	
+
 	//Create other needed vars
 	SOCKET listening;
 	sockaddr_in hint;
@@ -96,7 +104,7 @@ int main()
 		}
 
 		hint.sin_family = AF_INET;
-		hint.sin_port = htons(55000);
+		hint.sin_port = htons(port);
 		hint.sin_addr.S_un.S_addr = INADDR_ANY;
 
 		bind(listening, (sockaddr*)&hint, sizeof(hint));
@@ -138,21 +146,20 @@ int main()
 		{
 			breakCode += to_string(rand() % 10);
 		}
-		cout << "breakCode = " + breakCode << endl;
-		send(clientSocket, breakCode.c_str(), (breakCode.length() + 1), 0);
+		cout << "breakCode: " + breakCode << endl;
+		send(clientSocket, breakCode.c_str(), breakCode.length(), 0);
 
 		//Main loop for running commands
 		while (true)
 		{
-			//Get data and run command
-			ZeroMemory(buf, bufsize);
-
 			//Wait for client to send data
+			ZeroMemory(buf, bufsize);
 			bytesReceived = recv(clientSocket, buf, bufsize, 0);
 
 			if (bytesReceived == SOCKET_ERROR)
 			{
 				cout << "Socket Error recieved, did winrund stop?" << endl;
+				break;
 			}
 			else if (bytesReceived == 0)
 			{
@@ -161,15 +168,18 @@ int main()
 			}
 			else
 			{
-				//Run command and echo output back to client
-				id = string(buf, 0, bytesReceived).substr(0, string(buf, 0, bytesReceived).find("\""));
-				cout << "Recieved command for ID: " + id << endl;
+				//Run command and echo output back to 
+				cout << "Recieved: " << string(buf, 0, bytesReceived) << endl;
+				if (string(buf, 0, bytesReceived).substr(0, breakCode.length()) == breakCode)
+				{
+					id = string(buf, 0, bytesReceived).substr(breakCode.length(), (string(buf, 0, bytesReceived).find("\"") - breakCode.length()));
+					cout << "Recieved command for ID: " + id << endl;
 
-				command = string(buf, 0, bytesReceived).substr(id.length(), (string(buf, 0, bytesReceived).length() - id.length())).c_str();
-				cout << "Running command " + command << endl;
-				getCmdOut(command, clientSocket, breakCode);
+					command = string(buf, 0, bytesReceived).substr(breakCode.length() + id.length(), (string(buf, 0, bytesReceived).length() - (breakCode.length() + id.length()))).c_str();
+					cout << "Running command " + command << endl;
 
-				cout << "Command completed!" << endl;
+					getCmdOut(id, command, clientSocket, breakCode);
+				}
 			}
 		}
 	}
@@ -180,6 +190,24 @@ int main()
 
 	//Cleanup winsock
 	WSACleanup();
+
+	return 0;
+}
+int main()
+{
+	//Create process threads
+	for (int i = 0; i < 8; i++)
+	{
+		cout << "Spawning child thread on port: " << (55000 + i) << endl;
+		std::thread winrun_svr_child_thread(winrun_svr_child,55000 + i);
+		winrun_svr_child_thread.detach();
+	}
+
+	//Keep program from crashing.
+	while (true)
+	{
+		Sleep(1000);
+	}
 
 	return 0;
 }
