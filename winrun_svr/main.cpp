@@ -13,12 +13,17 @@ const int bufsize = 4096;
 void getCmdOut(string clientID, string cmd, int s, string b)
 {
 	int line = 0;
-	int recvBytes;
+	int recvBytes, rv;
 	string data;
 	string recvStr;
 	FILE* stream;
 	char buffer[bufsize];
 	char recvBuffer[bufsize];
+	fd_set readfds, masterfds;
+	timeval timeout;
+	timeout.tv_sec = 5;
+	timeout.tv_usec = 0;
+
 	cmd.append(" 2>&1");
 	stream = _popen(cmd.c_str(), "r");
 
@@ -43,12 +48,27 @@ void getCmdOut(string clientID, string cmd, int s, string b)
 
 					ZeroMemory(recvBuffer, bufsize);
 
-					//Wait for signal to come in from client to continue working
-					do
+					//Wait for signal to come in from client to continue working.
+					FD_ZERO(&masterfds);
+					FD_SET(s, &masterfds);
+					memcpy(&readfds, &masterfds, sizeof(fd_set));
+					rv = select(s + 1, &readfds, NULL, NULL, &timeout);
+
+					if (rv == SOCKET_ERROR)
+					{
+						cout << "Socket error during select() on PID \"" << clientID << "\"" << endl;
+						break;
+					}
+					else if (rv == 0)
+					{
+						cout << "Timeout ("<< timeout.tv_sec << " sec, " << timeout.tv_usec << " usec) while waiting for continue signal for PID \"" << clientID << "\"" << endl;
+						break;
+					}
+					else
 					{
 						recvBytes = recv(s, recvBuffer, bufsize, 0);
 						recvStr = std::string(recvBuffer, 0, recvBytes);
-					} while (recvStr.substr(0, recvStr.find("-")+2) != (clientID+"-1"));
+					}
 				}
 			}
 		}
@@ -66,7 +86,7 @@ int winrun_svr_child(int port)
 	WSADATA wsData;
 	WORD ver = MAKEWORD(2, 2);
 	int wsok = WSAStartup(ver, &wsData);
-	string output, breakCode, command, id;
+	string output, breakCode, command, pid;
 
 	if (wsok != 0)
 	{
@@ -166,19 +186,24 @@ int winrun_svr_child(int port)
 				cout << "Client disconected." << endl;
 				break;
 			}
+			else if (string(buf, 0, bytesReceived) == "ready")
+			{
+				cout << "Returning ready signal" << endl;
+				send(clientSocket, string(buf, 0, bytesReceived).c_str(), string(buf, 0, bytesReceived).length() + 1, 0);
+			}
 			else
 			{
-				//Run command and echo output back to 
+				//Run command and echo output back to daemon
 				cout << "Recieved: " << string(buf, 0, bytesReceived) << endl;
 				if (string(buf, 0, bytesReceived).substr(0, breakCode.length()) == breakCode)
 				{
-					id = string(buf, 0, bytesReceived).substr(breakCode.length(), (string(buf, 0, bytesReceived).find("\"") - breakCode.length()));
-					cout << "Recieved command for ID: " + id << endl;
+					pid = string(buf, 0, bytesReceived).substr(breakCode.length(), (string(buf, 0, bytesReceived).find("\"") - breakCode.length()));
+					cout << "Recieved command for PID: " + pid << endl;
 
-					command = string(buf, 0, bytesReceived).substr(breakCode.length() + id.length(), (string(buf, 0, bytesReceived).length() - (breakCode.length() + id.length()))).c_str();
+					command = string(buf, 0, bytesReceived).substr(breakCode.length() + pid.length(), (string(buf, 0, bytesReceived).length() - (breakCode.length() + pid.length()))).c_str();
 					cout << "Running command " + command << endl;
 
-					getCmdOut(id, command, clientSocket, breakCode);
+					getCmdOut(pid, command, clientSocket, breakCode);
 				}
 			}
 		}
@@ -203,7 +228,7 @@ int main()
 		winrun_svr_child_thread.detach();
 	}
 
-	//Keep program from crashing.
+	//Keep program from exiting
 	while (true)
 	{
 		Sleep(1000);
