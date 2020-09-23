@@ -1,16 +1,46 @@
 #include <iostream>
+#include <stdarg.h>
 #include <WS2tcpip.h>
 #include <string>
 #include <time.h>
 #include <thread>
+#include <mutex>
 
 #pragma comment (lib,"ws2_32.lib")
 
 using namespace std;
 
 const int bufsize = 4096;
+bool threadIsWorking[8];
+char sbuf[INT16_MAX];
+std::mutex mtx;
 
-void getCmdOut(string clientID, string cmd, int s, string b)
+void output(FILE* stream, int _thread, const char* format, ...)
+{
+	mtx.lock();
+
+	//Create and output a date/time stamp
+	SYSTEMTIME st;
+	string result;
+	GetLocalTime(&st);
+	int y = st.wYear;
+	int M = st.wMonth;
+	int d = st.wDay;
+	int h = st.wHour;
+	int m = st.wMinute;
+	int s = st.wSecond;
+	int milli = st.wMilliseconds;
+	fprintf(stream, "[%d-%02d-%02d %02d:%02d:%02d.%03d](%d) ", y, M, d, h, m, s, milli,_thread);
+
+	//Output the actual args
+	va_list args;
+	va_start(args, format);
+	vfprintf(stream, format, args);
+	va_end(args);
+
+	mtx.unlock();
+}
+void getCmdOut(int t, string clientID, string cmd, int s, string b)
 {
 	int line = 0;
 	int recvBytes, rv;
@@ -24,7 +54,12 @@ void getCmdOut(string clientID, string cmd, int s, string b)
 	timeout.tv_sec = 5;
 	timeout.tv_usec = 0;
 
-	cmd.append(" 2>&1");
+	//If user doesn't specify any output redirection, redirect stderr to stdout.
+	if (cmd.find(" 1>") == string::npos && cmd.find(" 2>") == string::npos)
+	{
+		cmd.append(" 2>&1");
+	}
+	
 	stream = _popen(cmd.c_str(), "r");
 
 	//Send id
@@ -42,7 +77,9 @@ void getCmdOut(string clientID, string cmd, int s, string b)
 				{
 					data = clientID + "-" + std::to_string(line) + "-" + data;
 					send(s, data.c_str(), data.length() + 1, 0);
-					cout << "\t" + data;
+
+					output(stdout, t, "\t%s", data.c_str());
+
 					data = "";
 					line++;
 
@@ -56,12 +93,12 @@ void getCmdOut(string clientID, string cmd, int s, string b)
 
 					if (rv == SOCKET_ERROR)
 					{
-						cout << "Socket error during select() on PID \"" << clientID << "\"" << endl;
+						output(stderr, t, "Socket error during select() on PID \"%s\"\n",clientID.c_str());
 						break;
 					}
 					else if (rv == 0)
 					{
-						cout << "Timeout ("<< timeout.tv_sec << " sec, " << timeout.tv_usec << " usec) while waiting for continue signal for PID \"" << clientID << "\"" << endl;
+						output(stderr, t, "Timeout (>%ld.%06ld seconds) while waiting for continue signal for PID %s\n", timeout.tv_sec, timeout.tv_usec, clientID.c_str() );
 						break;
 					}
 					else
@@ -75,27 +112,29 @@ void getCmdOut(string clientID, string cmd, int s, string b)
 
 		//Send break code to client to signal completion of command execution
 		send(s, (clientID + "-" + b).c_str(), (clientID.length()+string("-").length()+b.length() + 1), 0);
-		cout << "Command completed!" << endl;
+		output(stdout, t, "Command completed!\n");
 
 		_pclose(stream);
 	}
 }
-int winrun_svr_child(int port)
+int winrun_svr_controller(int port)
 {
+	int threadID = port - 55000;
+
 	//Initialize winsock
 	WSADATA wsData;
-	WORD ver = MAKEWORD(2, 2);
+	WORD ver = MAKEWORD(2, 2);	
 	int wsok = WSAStartup(ver, &wsData);
-	string output, breakCode, command, pid;
+	string breakCode, command, pid;
 
 	if (wsok != 0)
 	{
-		cerr << "Unable to initialize Winsock! Quitting..." << endl;
+		output(stderr, threadID, "Unable to initialize Winsock! Quitting...\n" );
 		return -1;
 	}
 	else
 	{
-		cout << "Inititalized Winsock" << endl;
+		output(stdout, threadID, "Inititalized Winsock for port %d\n",port);
 	}
 
 	//Create other needed vars
@@ -115,12 +154,12 @@ int winrun_svr_child(int port)
 		listening = socket(AF_INET, SOCK_STREAM, 0);
 		if (listening == INVALID_SOCKET)
 		{
-			cerr << "Unable to create socket! Quitting..." << endl;
+			output(stderr, threadID, "Unable to create socket! Quitting...\n" );
 			return -2;
 		}
 		else
 		{
-			cout << "Created socket " + to_string(listening) << endl;
+			output(stdout, threadID, "Created socket %d for port %d\n", listening, port);
 		}
 
 		hint.sin_family = AF_INET;
@@ -130,14 +169,14 @@ int winrun_svr_child(int port)
 		bind(listening, (sockaddr*)&hint, sizeof(hint));
 
 		//Tell winsock that socket is for listening
-		cout << "Waiting for client to connect..." << endl;
+		output(stdout, threadID, "Waiting for client to connect on port %d...\n", port);
 		listen(listening, SOMAXCONN);
 
 		clientSocket = accept(listening, (sockaddr*)&client, &clientSize);
 
 		if (clientSocket == INVALID_SOCKET)
 		{
-			cerr << "Invalid socket! Quitting..." << endl;
+			output(stderr, threadID, "Invalid socket! Quitting...\n");
 			return -3;
 		}
 
@@ -147,26 +186,149 @@ int winrun_svr_child(int port)
 		//Attempt to resolve client machine name, otherwise resort to IP
 		if (getnameinfo((sockaddr*)&client, sizeof(client), host, NI_MAXHOST, service, NI_MAXSERV, 0) == 0)
 		{
-			cout << endl;
-			cout << host << " connected on port " << service << endl;
+			output(stdout, threadID, "%s connected on port %s\n",host,service);
 		}
 		else
 		{
 			inet_ntop(AF_INET, &client.sin_addr, host, NI_MAXHOST);
-			cout << endl;
-			cout << host << " connected on port " << ntohs(client.sin_port) << endl;
+
+			output(stdout, threadID, "%s connected on port %d\n", host, ntohs(client.sin_port));
+		}
+
+		//Close listening socket
+		closesocket(listening);
+
+		//Main loop for running commands
+		while (true)
+		{
+			//Wait for client to send data
+			ZeroMemory(buf, bufsize);
+			bytesReceived = recv(clientSocket, buf, bufsize, 0);
+
+			if (bytesReceived == SOCKET_ERROR)
+			{
+				output(stderr, threadID, "Socket error recieved on port %d, did winrund stop?\n", port);
+				break;
+			}
+			else if (bytesReceived == 0)
+			{
+				output(stdout, threadID, "Client disconnected from port %d\n",port);
+				break;
+			}
+			else
+			{
+				//Run command and echo output back to daemon
+				if (threadIsWorking[(stoi(string(buf, 0, bytesReceived)))])
+				{
+					output(stdout, threadID, "Thread %s is busy\n", string(buf, 0, bytesReceived).c_str());
+					send(clientSocket, string("1").c_str(), string("1").size(), 0);
+				}
+				else
+				{
+					output(stdout, threadID, "Thread %s is idle\n", string(buf, 0, bytesReceived).c_str());
+					send(clientSocket, string("0").c_str(), string("0").size(), 0);
+				}
+			}
+		}
+	}
+
+	//Close socket
+	output(stdout, threadID, "Closing socket %d on port %d\n", clientSocket, port);
+	closesocket(clientSocket);
+
+	//Cleanup winsock
+	WSACleanup();
+
+	return 0;
+}
+int winrun_svr_child(int port)
+{
+	int threadID = port - 55000;
+
+	//Initialize winsock
+	WSADATA wsData;
+	WORD ver = MAKEWORD(2, 2);
+	int wsok = WSAStartup(ver, &wsData);
+	string breakCode, command, pid;
+
+	if (wsok != 0)
+	{
+		output(stderr, threadID, "Unable to initialize Winsock! Quitting...\n");
+		return -1;
+	}
+	else
+	{
+		output(stdout, threadID, "Inititalized Winsock for port %d\n", port);
+	}
+
+	//Create other needed vars
+	SOCKET listening;
+	sockaddr_in hint;
+	sockaddr_in client;
+	int clientSize = sizeof(client);
+	int bytesReceived = 0;
+	SOCKET clientSocket;
+	char host[NI_MAXHOST];		//Client name
+	char service[NI_MAXSERV];	//Service the client is connected on
+	char buf[bufsize];
+
+	while (bytesReceived == 0)
+	{
+		//Initialize listening socket
+		listening = socket(AF_INET, SOCK_STREAM, 0);
+		if (listening == INVALID_SOCKET)
+		{
+			output(stderr, threadID, "Unable to create socket! Quitting...\n");
+			return -2;
+		}
+		else
+		{
+			output(stdout, threadID, "Created socket %d for port %d\n", listening, port);
+		}
+
+		hint.sin_family = AF_INET;
+		hint.sin_port = htons(port);
+		hint.sin_addr.S_un.S_addr = INADDR_ANY;
+
+		bind(listening, (sockaddr*)&hint, sizeof(hint));
+
+		//Tell winsock that socket is for listening
+		output(stdout, threadID, "Waiting for client to connect on port %d...\n", port);
+		listen(listening, SOMAXCONN);
+
+		clientSocket = accept(listening, (sockaddr*)&client, &clientSize);
+
+		if (clientSocket == INVALID_SOCKET)
+		{
+			output(stderr, threadID, "Invalid socket! Quitting...\n");
+			return -3;
+		}
+
+		ZeroMemory(host, NI_MAXHOST);
+		ZeroMemory(service, NI_MAXSERV);
+
+		//Attempt to resolve client machine name, otherwise resort to IP
+		if (getnameinfo((sockaddr*)&client, sizeof(client), host, NI_MAXHOST, service, NI_MAXSERV, 0) == 0)
+		{
+			output(stdout, threadID, "%s connected on port %s\n", host, service);
+		}
+		else
+		{
+			inet_ntop(AF_INET, &client.sin_addr, host, NI_MAXHOST);
+
+			output(stdout, threadID, "%s connected on port %d\n", host, ntohs(client.sin_port));
 		}
 
 		//Close listening socket
 		closesocket(listening);
 
 		//Generate 64 digit code to signal the completion of the command execution and inform client.
-		srand(time(NULL));
+		srand(port);
 		for (int i = 0; i < 64; i++)
 		{
 			breakCode += to_string(rand() % 10);
 		}
-		cout << "breakCode: " + breakCode << endl;
+		output(stdout, threadID, "Break code: %s\n", breakCode.c_str());
 		send(clientSocket, breakCode.c_str(), breakCode.length(), 0);
 
 		//Main loop for running commands
@@ -178,39 +340,35 @@ int winrun_svr_child(int port)
 
 			if (bytesReceived == SOCKET_ERROR)
 			{
-				cout << "Socket Error recieved, did winrund stop?" << endl;
+				output(stderr, threadID, "Socket error recieved on port %d, did winrund stop?\n", port);
 				break;
 			}
 			else if (bytesReceived == 0)
 			{
-				cout << "Client disconected." << endl;
+				output(stdout, threadID, "Client disconnected from port %d\n", port);
 				break;
-			}
-			else if (string(buf, 0, bytesReceived) == "ready")
-			{
-				cout << "Returning ready signal" << endl;
-				send(clientSocket, string(buf, 0, bytesReceived).c_str(), string(buf, 0, bytesReceived).length() + 1, 0);
 			}
 			else
 			{
 				//Run command and echo output back to daemon
-				cout << "Recieved: " << string(buf, 0, bytesReceived) << endl;
 				if (string(buf, 0, bytesReceived).substr(0, breakCode.length()) == breakCode)
 				{
 					pid = string(buf, 0, bytesReceived).substr(breakCode.length(), (string(buf, 0, bytesReceived).find("\"") - breakCode.length()));
-					cout << "Recieved command for PID: " + pid << endl;
+					output(stdout, threadID, "Recieved command for PID %s on port %d\n",pid.c_str(), port);
 
 					command = string(buf, 0, bytesReceived).substr(breakCode.length() + pid.length(), (string(buf, 0, bytesReceived).length() - (breakCode.length() + pid.length()))).c_str();
-					cout << "Running command " + command << endl;
+					output(stdout, threadID, "Running command %s on port %d\n",command.c_str(), port);
 
-					getCmdOut(pid, command, clientSocket, breakCode);
+					threadIsWorking[port - 55000] = true;
+					getCmdOut(threadID, pid, command, clientSocket, breakCode);
+					threadIsWorking[port - 55000] = false;
 				}
 			}
 		}
 	}
 
 	//Close socket
-	cout << "Closing socket..." << endl;
+	output(stdout, threadID, "Closing socket %d on port %d\n", clientSocket, port);
 	closesocket(clientSocket);
 
 	//Cleanup winsock
@@ -221,14 +379,18 @@ int winrun_svr_child(int port)
 int main()
 {
 	//Create process threads
-	for (int i = 0; i < 8; i++)
+	output(stdout, 0, "Spawning controller thread on port %d\n",55000);
+	std::thread winrun_svr_controller_thread(winrun_svr_controller, 55000);
+	winrun_svr_controller_thread.detach();
+
+	for (int i = 1; i <= 8; i++)
 	{
-		cout << "Spawning child thread on port: " << (55000 + i) << endl;
+		output(stdout, 0, "Spawning child thread on port %d\n", (55000+i));
 		std::thread winrun_svr_child_thread(winrun_svr_child,55000 + i);
 		winrun_svr_child_thread.detach();
 	}
 
-	//Keep program from exiting
+	//Check for signal from daemon to report on idle threads
 	while (true)
 	{
 		Sleep(1000);
