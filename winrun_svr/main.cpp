@@ -12,11 +12,11 @@ using namespace std;
 
 const int bufsize = 4096;
 bool threadIsWorking[8];
-char sbuf[INT16_MAX];
-std::mutex mtx;
 
 void output(FILE* stream, int _thread, const char* format, ...)
 {
+	std::mutex mtx;
+
 	mtx.lock();
 
 	//Create and output a date/time stamp
@@ -29,8 +29,8 @@ void output(FILE* stream, int _thread, const char* format, ...)
 	int h = st.wHour;
 	int m = st.wMinute;
 	int s = st.wSecond;
-	int milli = st.wMilliseconds;
-	fprintf(stream, "[%d-%02d-%02d %02d:%02d:%02d.%03d](%d) ", y, M, d, h, m, s, milli,_thread);
+	int ms = st.wMilliseconds;
+	fprintf(stream, "[%d-%02d-%02d %02d:%02d:%02d.%03d](%d) ", y, M, d, h, m, s, ms, _thread);
 
 	//Output the actual args
 	va_list args;
