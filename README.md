@@ -3,4 +3,4 @@ The Windows server for winrund (https://github.com/TheMohawkNinja/winrun) to sen
 
 winrun_svr.exe recieves the commands from winrund, executes the commands, and returns the output line-by-line back to winrund for writing to an output file.
 
-You must pass the full path of the configuration file as an argument when running winrun_svr.exe
+You must pass the full path of the configuration file (winrun_svr.cfg) as an argument when running winrun_svr.exe
