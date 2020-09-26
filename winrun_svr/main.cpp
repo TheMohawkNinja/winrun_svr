@@ -5,23 +5,26 @@
 #include <time.h>
 #include <thread>
 #include <mutex>
+#include <fstream>
 
 #pragma comment (lib,"ws2_32.lib")
 
-using namespace std;
-
 const int bufsize = 4096;
-bool threadIsWorking[8];
+int basePort;
+bool* threadIsWorking;
+std::string logfile;
+std::mutex mtx;
 
 void output(FILE* stream, int _thread, const char* format, ...)
 {
-	std::mutex mtx;
-
 	mtx.lock();
+
+	FILE* logWriter;
+	fopen_s(&logWriter,logfile.c_str(), "a");
 
 	//Create and output a date/time stamp
 	SYSTEMTIME st;
-	string result;
+	std::string result;
 	GetLocalTime(&st);
 	int y = st.wYear;
 	int M = st.wMonth;
@@ -31,31 +34,35 @@ void output(FILE* stream, int _thread, const char* format, ...)
 	int s = st.wSecond;
 	int ms = st.wMilliseconds;
 	fprintf(stream, "[%d-%02d-%02d %02d:%02d:%02d.%03d](%d) ", y, M, d, h, m, s, ms, _thread);
+	fprintf(logWriter, "[%d-%02d-%02d %02d:%02d:%02d.%03d](%d) ", y, M, d, h, m, s, ms, _thread);
 
 	//Output the actual args
 	va_list args;
 	va_start(args, format);
 	vfprintf(stream, format, args);
+	vfprintf(logWriter, format, args);
 	va_end(args);
+
+	fclose(logWriter);
 
 	mtx.unlock();
 }
-void getCmdOut(int t, string clientID, string cmd, int s, string b)
+void getCmdOut(int t, std::string clientID, std::string cmd, int s, std::string b)
 {
 	int line = 0;
 	int recvBytes, rv;
-	string data;
-	string recvStr;
+	std::string data;
+	std::string recvStr;
 	FILE* stream;
 	char buffer[bufsize];
 	char recvBuffer[bufsize];
 	fd_set readfds, masterfds;
 	timeval timeout;
-	timeout.tv_sec = 5;
+	timeout.tv_sec = 1;
 	timeout.tv_usec = 0;
 
 	//If user doesn't specify any output redirection, redirect stderr to stdout.
-	if (cmd.find(" 1>") == string::npos && cmd.find(" 2>") == string::npos)
+	if (cmd.find(" 1>") == std::string::npos && cmd.find(" 2>") == std::string::npos)
 	{
 		cmd.append(" 2>&1");
 	}
@@ -111,7 +118,7 @@ void getCmdOut(int t, string clientID, string cmd, int s, string b)
 		}
 
 		//Send break code to client to signal completion of command execution
-		send(s, (clientID + "-" + b).c_str(), (clientID.length()+string("-").length()+b.length() + 1), 0);
+		send(s, (clientID + "-" + b).c_str(), (clientID.length()+ std::string("-").length()+b.length() + 1), 0);
 		output(stdout, t, "Command completed!\n");
 
 		_pclose(stream);
@@ -119,13 +126,13 @@ void getCmdOut(int t, string clientID, string cmd, int s, string b)
 }
 int winrun_svr_controller(int port)
 {
-	int threadID = port - 55000;
+	int threadID = port - basePort;
 
 	//Initialize winsock
 	WSADATA wsData;
 	WORD ver = MAKEWORD(2, 2);	
 	int wsok = WSAStartup(ver, &wsData);
-	string breakCode, command, pid;
+	std::string breakCode, command, pid;
 
 	if (wsok != 0)
 	{
@@ -218,15 +225,16 @@ int winrun_svr_controller(int port)
 			else
 			{
 				//Run command and echo output back to daemon
-				if (threadIsWorking[(stoi(string(buf, 0, bytesReceived)))])
+				output(stdout, threadID, "Checking state of thread %s\n", std::string(buf, 0, bytesReceived).c_str());
+				if (threadIsWorking[(std::stoi(std::string(buf, 0, bytesReceived)))])
 				{
-					output(stdout, threadID, "Thread %s is busy\n", string(buf, 0, bytesReceived).c_str());
-					send(clientSocket, string("1").c_str(), string("1").size(), 0);
+					output(stdout, threadID, "Thread %s is busy\n", std::string(buf, 0, bytesReceived).c_str());
+					send(clientSocket, std::string("1").c_str(), std::string("1").size(), 0);
 				}
 				else
 				{
-					output(stdout, threadID, "Thread %s is idle\n", string(buf, 0, bytesReceived).c_str());
-					send(clientSocket, string("0").c_str(), string("0").size(), 0);
+					output(stdout, threadID, "Thread %s is idle\n", std::string(buf, 0, bytesReceived).c_str());
+					send(clientSocket, std::string("0").c_str(), std::string("0").size(), 0);
 				}
 			}
 		}
@@ -243,13 +251,13 @@ int winrun_svr_controller(int port)
 }
 int winrun_svr_child(int port)
 {
-	int threadID = port - 55000;
+	int threadID = port - basePort;
 
 	//Initialize winsock
 	WSADATA wsData;
 	WORD ver = MAKEWORD(2, 2);
 	int wsok = WSAStartup(ver, &wsData);
-	string breakCode, command, pid;
+	std::string breakCode, command, pid;
 
 	if (wsok != 0)
 	{
@@ -326,9 +334,9 @@ int winrun_svr_child(int port)
 		srand(port);
 		for (int i = 0; i < 64; i++)
 		{
-			breakCode += to_string(rand() % 10);
+			breakCode += std::to_string(rand() % 10);
 		}
-		output(stdout, threadID, "Break code: %s\n", breakCode.c_str());
+		output(stdout, threadID, "Break code for port %d is %s\n",port, breakCode.c_str());
 		send(clientSocket, breakCode.c_str(), breakCode.length(), 0);
 
 		//Main loop for running commands
@@ -351,17 +359,17 @@ int winrun_svr_child(int port)
 			else
 			{
 				//Run command and echo output back to daemon
-				if (string(buf, 0, bytesReceived).substr(0, breakCode.length()) == breakCode)
+				if (std::string(buf, 0, bytesReceived).substr(0, breakCode.length()) == breakCode)
 				{
-					pid = string(buf, 0, bytesReceived).substr(breakCode.length(), (string(buf, 0, bytesReceived).find("\"") - breakCode.length()));
+					pid = std::string(buf, 0, bytesReceived).substr(breakCode.length(), (std::string(buf, 0, bytesReceived).find("\"") - breakCode.length()));
 					output(stdout, threadID, "Recieved command for PID %s on port %d\n",pid.c_str(), port);
 
-					command = string(buf, 0, bytesReceived).substr(breakCode.length() + pid.length(), (string(buf, 0, bytesReceived).length() - (breakCode.length() + pid.length()))).c_str();
+					command = std::string(buf, 0, bytesReceived).substr(breakCode.length() + pid.length(), (std::string(buf, 0, bytesReceived).length() - (breakCode.length() + pid.length()))).c_str();
 					output(stdout, threadID, "Running command %s on port %d\n",command.c_str(), port);
 
-					threadIsWorking[port - 55000] = true;
+					threadIsWorking[port - basePort] = true;
 					getCmdOut(threadID, pid, command, clientSocket, breakCode);
-					threadIsWorking[port - 55000] = false;
+					threadIsWorking[port - basePort] = false;
 				}
 			}
 		}
@@ -376,17 +384,74 @@ int winrun_svr_child(int port)
 
 	return 0;
 }
-int main()
+int main(int argc, char *argv[])
 {
+	int maxThreads;
+	std::string line;
+	std::ifstream configReader;
+
+	//Resize window a bit so most output doesn't wrap
+	HWND window = GetConsoleWindow();
+	MoveWindow(window, 100, 100, 750, 250, TRUE);
+
+	//Get configuration info
+	if (argv[2])
+	{
+		fprintf(stderr, "Unknown arg \"%s\"\n", argv[2]);
+		return -1;
+	}
+	else
+	{
+		try
+		{
+			configReader.open(argv[1]);
+			while (!configReader.eof())
+			{
+				getline(configReader, line);
+
+				if (line.substr(0, 1) != "#")//Hashtag denotes comments
+				{
+					if (line.find("threads") == 0)
+					{
+						maxThreads = stoi(line.substr(line.find("=")+1, line.length() - line.find("=")));
+						
+						fprintf(stdout, "Setting thread count to \"%d\"\n", maxThreads);
+						threadIsWorking = new bool[maxThreads];
+					}
+					else if (line.find("port") == 0)
+					{
+						basePort = stoi(line.substr(line.find("=")+1, line.length() - line.find("=")));
+						fprintf(stdout, "Setting base port to \"%d\"\n", basePort);
+					}
+					else if (line.find("log") == 0)
+					{
+						logfile = line.substr(line.find("=")+1, line.length() - line.find("="));
+						fprintf(stdout, "Setting log file location to \"%s\"\n", logfile.c_str());
+					}
+				}
+			}
+		}
+		catch (...)
+		{
+			fprintf(stderr, "Error while attempting to read config file at \"%s\"\n", argv[1]);
+			return -2;
+		}
+	}
+
+	for (int i = 0; i < sizeof(threadIsWorking); i++)
+	{
+		threadIsWorking[i] = false;
+	}
+
 	//Create process threads
-	output(stdout, 0, "Spawning controller thread on port %d\n",55000);
-	std::thread winrun_svr_controller_thread(winrun_svr_controller, 55000);
+	output(stdout, 0, "Spawning controller thread on port %d\n",basePort);
+	std::thread winrun_svr_controller_thread(winrun_svr_controller, basePort);
 	winrun_svr_controller_thread.detach();
 
-	for (int i = 1; i <= 8; i++)
+	for (int i = 1; i <= maxThreads; i++)
 	{
-		output(stdout, 0, "Spawning child thread on port %d\n", (55000+i));
-		std::thread winrun_svr_child_thread(winrun_svr_child,55000 + i);
+		output(stdout, 0, "Spawning child thread on port %d\n", (basePort + i));
+		std::thread winrun_svr_child_thread(winrun_svr_child,(basePort + i));
 		winrun_svr_child_thread.detach();
 	}
 
