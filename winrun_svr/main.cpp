@@ -392,7 +392,7 @@ int main(int argc, char *argv[])
 
 	//Resize window a bit so most output doesn't wrap
 	HWND window = GetConsoleWindow();
-	MoveWindow(window, 100, 100, 750, 250, TRUE);
+	MoveWindow(window, 100, 100, 800, 250, TRUE);
 
 	//Get configuration info
 	if (argv[2])
@@ -417,6 +417,11 @@ int main(int argc, char *argv[])
 						fprintf(stdout, "Setting thread count to \"%d\"\n", maxThreads);
 
 						threadIsWorking = new bool[maxThreads];
+
+						for (int i = 0; i < maxThreads; i++)
+						{
+							threadIsWorking[maxThreads] = false;
+						}
 					}
 					else if (line.find("port") == 0)
 					{
