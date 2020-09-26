@@ -414,8 +414,8 @@ int main(int argc, char *argv[])
 					if (line.find("threads") == 0)
 					{
 						maxThreads = stoi(line.substr(line.find("=")+1, line.length() - line.find("=")));
-						
 						fprintf(stdout, "Setting thread count to \"%d\"\n", maxThreads);
+
 						threadIsWorking = new bool[maxThreads];
 					}
 					else if (line.find("port") == 0)
