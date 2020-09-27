@@ -443,11 +443,6 @@ int main(int argc, char *argv[])
 		}
 	}
 
-	for (int i = 0; i < sizeof(threadIsWorking); i++)
-	{
-		threadIsWorking[i] = false;
-	}
-
 	//Create process threads
 	output(stdout, 0, "Spawning controller thread on port %d\n",basePort);
 	std::thread winrun_svr_controller_thread(winrun_svr_controller, basePort);
