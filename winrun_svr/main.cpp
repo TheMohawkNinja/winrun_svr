@@ -420,7 +420,7 @@ int main(int argc, char *argv[])
 
 						for (int i = 0; i < maxThreads; i++)
 						{
-							threadIsWorking[maxThreads] = false;
+							threadIsWorking[i] = false;
 						}
 					}
 					else if (line.find("port") == 0)
