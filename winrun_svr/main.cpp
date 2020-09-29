@@ -332,6 +332,7 @@ int winrun_svr_child(int port)
 
 		//Generate 64 digit code to signal the completion of the command execution and inform client.
 		srand(port);
+		breakCode = "";
 		for (int i = 0; i < 64; i++)
 		{
 			breakCode += std::to_string(rand() % 10);
