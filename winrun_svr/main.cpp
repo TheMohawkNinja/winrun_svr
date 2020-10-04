@@ -95,11 +95,13 @@ void getCmdOut(int t, std::string clientID, std::string cmd, int s, std::string 
 					if (rv == SOCKET_ERROR)
 					{
 						output(stderr, t, "Socket error during select() on PID \"%s\"\n",clientID.c_str());
+						return;
 						break;
 					}
 					else if (rv == 0)
 					{
-						output(stderr, t, "Timeout (>%ld.%06ld seconds) while waiting for continue signal for PID %s\n", timeout.tv_sec, timeout.tv_usec, clientID.c_str() );
+						output(stderr, t, "Timeout (>%ld.%06ld seconds) while waiting for continue signal for PID %s\n", timeout.tv_sec, timeout.tv_usec, clientID.c_str());
+						return;
 						break;
 					}
 					else
@@ -112,10 +114,21 @@ void getCmdOut(int t, std::string clientID, std::string cmd, int s, std::string 
 		}
 
 		//Send break code to client to signal completion of command execution
-		send(s, (clientID + "-" + b).c_str(), (clientID.length()+ std::string("-").length()+b.length() + 1), 0);
-		output(stdout, t, "Command completed!\n");
+		send(s, (clientID + "-" + b).c_str(), (clientID.length()+ std::string("-").length() + b.length() + 1), 0);
+		output(stdout, t, "Command \"%s\" completed!\n",cmd.c_str());
 
 		_pclose(stream);
+
+		return;
+	}
+	else //Handle error for when stream fails to initalize
+	{
+		send(s, (clientID + "-" + b).c_str(), (clientID.length() + std::string("-").length() + b.length() + 1), 0);
+		output(stdout, t, "An error occured while trying to run \"%s\".\n", cmd.c_str());
+
+		_pclose(stream);
+
+		return;
 	}
 }
 int winrun_svr_controller(int port)
@@ -362,9 +375,11 @@ int winrun_svr_child(int port)
 					command = std::string(buf, 0, bytesReceived).substr(breakCode.length() + pid.length(), (std::string(buf, 0, bytesReceived).length() - (breakCode.length() + pid.length()))).c_str();
 					output(stdout, threadID, "Running command %s on port %d\n",command.c_str(), port);
 
-					threadIsWorking[port - basePort] = true;
+					threadIsWorking[threadID] = true;
+					output(stdout, threadID, "Thread %d is now busy\n", threadID);
 					getCmdOut(threadID, pid, command, clientSocket, breakCode);
-					threadIsWorking[port - basePort] = false;
+					output(stdout, threadID, "Thread %d is now idle\n", threadID);
+					threadIsWorking[threadID] = false;
 				}
 			}
 		}
