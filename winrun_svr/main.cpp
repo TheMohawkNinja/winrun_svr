@@ -6,6 +6,8 @@
 #include <thread>
 #include <mutex>
 #include <fstream>
+#include <windows.h>
+#include <Lmcons.h>
 
 #pragma comment (lib,"ws2_32.lib")
 
@@ -397,60 +399,62 @@ int winrun_svr_child(int port)
 int main(int argc, char *argv[])
 {
 	int maxThreads;
-	std::string line;
+	std::string line, user;
+	TCHAR tuser[UNLEN + 1];
+	DWORD tuser_len = UNLEN + 1;
+	GetUserName((TCHAR*)tuser, &tuser_len);
 	std::ifstream configReader;
 
 	//Resize window a bit so most output doesn't wrap
 	HWND window = GetConsoleWindow();
 	MoveWindow(window, 100, 100, 800, 250, TRUE);
 
+	#ifndef UNICODE
+		user=t;
+	#else
+		std::wstring wStr = tuser;
+		user = std::string(wStr.begin(), wStr.end());
+	#endif
+
 	//Get configuration info
-	if (argv[2])
+	try
 	{
-		fprintf(stderr, "Unknown arg \"%s\"\n", argv[2]);
-		return -1;
-	}
-	else
-	{
-		try
+		configReader.open("C:/Users/"+user+"/Documents/winrun_svr.cfg");
+		while (!configReader.eof())
 		{
-			configReader.open(argv[1]);
-			while (!configReader.eof())
+			getline(configReader, line);
+
+			if (line.substr(0, 1) != "#")//Hashtag denotes comments
 			{
-				getline(configReader, line);
-
-				if (line.substr(0, 1) != "#")//Hashtag denotes comments
+				if (line.find("threads") == 0)
 				{
-					if (line.find("threads") == 0)
-					{
-						maxThreads = stoi(line.substr(line.find("=")+1, line.length() - line.find("=")));
-						fprintf(stdout, "Setting thread count to \"%d\"\n", maxThreads);
+					maxThreads = stoi(line.substr(line.find("=")+1, line.length() - line.find("=")));
+					fprintf(stdout, "Setting thread count to \"%d\"\n", maxThreads);
 
-						threadIsWorking = new bool[maxThreads];
+					threadIsWorking = new bool[maxThreads];
 
-						for (int i = 0; i < maxThreads; i++)
-						{
-							threadIsWorking[i] = false;
-						}
-					}
-					else if (line.find("port") == 0)
+					for (int i = 0; i < maxThreads; i++)
 					{
-						basePort = stoi(line.substr(line.find("=")+1, line.length() - line.find("=")));
-						fprintf(stdout, "Setting base port to \"%d\"\n", basePort);
+						threadIsWorking[i] = false;
 					}
-					else if (line.find("log") == 0)
-					{
-						logfile = line.substr(line.find("=")+1, line.length() - line.find("="));
-						fprintf(stdout, "Setting log file location to \"%s\"\n", logfile.c_str());
-					}
+				}
+				else if (line.find("port") == 0)
+				{
+					basePort = stoi(line.substr(line.find("=")+1, line.length() - line.find("=")));
+					fprintf(stdout, "Setting base port to \"%d\"\n", basePort);
+				}
+				else if (line.find("log") == 0)
+				{
+					logfile = line.substr(line.find("=")+1, line.length() - line.find("="));
+					fprintf(stdout, "Setting log file location to \"%s\"\n", logfile.c_str());
 				}
 			}
 		}
-		catch (...)
-		{
-			fprintf(stderr, "Error while attempting to read config file at \"%s\"\n", argv[1]);
-			return -2;
-		}
+	}
+	catch (...)
+	{
+		fprintf(stderr, "Error while attempting to read config file at \"%s\"\n", argv[1]);
+		return -2;
 	}
 
 	//Create process threads
