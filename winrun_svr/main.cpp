@@ -1,4 +1,3 @@
-#include <iostream>
 #include <stdarg.h>
 #include <WS2tcpip.h>
 #include <string>
@@ -6,7 +5,6 @@
 #include <thread>
 #include <mutex>
 #include <fstream>
-#include <windows.h>
 #include <Lmcons.h>
 
 #pragma comment (lib,"ws2_32.lib")
