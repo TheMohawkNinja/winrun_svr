@@ -232,16 +232,23 @@ int winrun_svr_controller(int port)
 			else
 			{
 				//Run command and echo output back to daemon
-				output(stdout, threadID, "Checking state of thread %s\n", std::string(buf, 0, bytesReceived).c_str());
-				if (threadIsWorking[(std::stoi(std::string(buf, 0, bytesReceived)))])
+				try
 				{
-					output(stdout, threadID, "Thread %s is busy\n", std::string(buf, 0, bytesReceived).c_str());
-					send(clientSocket, std::string("1").c_str(), std::string("1").size(), 0);
+					output(stdout, threadID, "Checking state of thread %s\n", std::string(buf, 0, bytesReceived).c_str());
+					if (threadIsWorking[(std::stoi(std::string(buf, 0, bytesReceived)))])
+					{
+						output(stdout, threadID, "Thread %s is busy\n", std::string(buf, 0, bytesReceived).c_str());
+						send(clientSocket, std::string("1").c_str(), std::string("1").size(), 0);
+					}
+					else
+					{
+						output(stdout, threadID, "Thread %s is idle\n", std::string(buf, 0, bytesReceived).c_str());
+						send(clientSocket, std::string("0").c_str(), std::string("0").size(), 0);
+					}
 				}
-				else
+				catch(...)
 				{
-					output(stdout, threadID, "Thread %s is idle\n", std::string(buf, 0, bytesReceived).c_str());
-					send(clientSocket, std::string("0").c_str(), std::string("0").size(), 0);
+					output(stderr, threadID, "Error occured while trying to check the state of thread %s\n", std::string(buf, 0, bytesReceived).c_str());
 				}
 			}
 		}
