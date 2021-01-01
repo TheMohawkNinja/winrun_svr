@@ -462,6 +462,17 @@ int main(int argc, char *argv[])
 		return -2;
 	}
 
+	//Remove log file on every start to prevent massive log files
+	try
+	{
+		remove(logfile.c_str());
+	}
+	catch (...)
+	{
+		fprintf(stderr, "Error while attempting to delete old log file at \"%s\"\n", logfile.c_str());
+		return -3;
+	}
+
 	//Create process threads
 	output(stdout, 0, "Spawning controller thread on port %d\n",basePort);
 	std::thread winrun_svr_controller_thread(winrun_svr_controller, basePort);
