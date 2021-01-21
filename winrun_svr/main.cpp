@@ -17,14 +17,22 @@ std::mutex mtx;
 
 void output(FILE* stream, int _thread, const char* format, ...)
 {
-	mtx.lock();
+	bool mtxlock = false;
 
+	while (!mtxlock)
+	{
+		mtxlock = mtx.try_lock();
+
+		if (!mtxlock)
+		{
+			Sleep(10);
+		}
+	}
 	FILE* logWriter;
-	fopen_s(&logWriter,logfile.c_str(), "a");
+	fopen_s(&logWriter, logfile.c_str(), "a");
 
 	//Create and output a date/time stamp
 	SYSTEMTIME st;
-	std::string result;
 	GetLocalTime(&st);
 	int y = st.wYear;
 	int M = st.wMonth;
@@ -34,16 +42,33 @@ void output(FILE* stream, int _thread, const char* format, ...)
 	int s = st.wSecond;
 	int ms = st.wMilliseconds;
 	fprintf(stream, "[%d-%02d-%02d %02d:%02d:%02d.%03d](%d) ", y, M, d, h, m, s, ms, _thread);
-	fprintf(logWriter, "[%d-%02d-%02d %02d:%02d:%02d.%03d](%d) ", y, M, d, h, m, s, ms, _thread);
+
+	if (logWriter)
+	{
+		fprintf(logWriter, "[%d-%02d-%02d %02d:%02d:%02d.%03d](%d) ", y, M, d, h, m, s, ms, _thread);
+	}
 
 	//Output the actual args
 	va_list args;
 	va_start(args, format);
 	vfprintf(stream, format, args);
-	vfprintf(logWriter, format, args);
+
+	if (logWriter)
+	{
+		vfprintf(logWriter, format, args);
+	}
+	else
+	{
+		fprintf(stream, "[%d-%02d-%02d %02d:%02d:%02d.%03d](%d) ", y, M, d, h, m, s, ms, _thread);
+		fprintf(stream, "^^^^^ ABOVE TEXT NOT LOGGED DUE TO ERROR WHILE ATTEMPTING TO OPEN LOG FILE ^^^^^\n");
+	}
+
 	va_end(args);
 
-	fclose(logWriter);
+	if (logWriter)
+	{
+		fclose(logWriter);
+	}
 
 	mtx.unlock();
 }
@@ -248,7 +273,8 @@ int winrun_svr_controller(int port)
 				}
 				catch(...)
 				{
-					output(stderr, threadID, "Error occured while trying to check the state of thread %s\n", std::string(buf, 0, bytesReceived).c_str());
+					output(stderr, threadID, "Error occured while trying to check the state of thread %s. Sending busy signal to attempt next thread.\n", std::string(buf, 0, bytesReceived).c_str());
+					send(clientSocket, std::string("1").c_str(), std::string("1").size(), 0);
 				}
 			}
 		}
